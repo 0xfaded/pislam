@@ -88,10 +88,10 @@ Performance
 
 Four separate steps comprise the ORB extraction process.
 
- # FAST keypoint detection
- # Harris score filtering
- # Non-max suppression
- # ORB computation
+ 1. FAST keypoint detection
+ 2. Harris score filtering
+ 3. Non-max suppression
+ 4. ORB computation
 
 Unlike other FAST implementations which try to detect non-features and abort quickly,
 PiSlam uses a pure SIMD implementation. Therefore the running time is constant and
