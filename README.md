@@ -17,10 +17,10 @@ PiSlam aims for the following metrics:
  * 256 bits per descriptor.
 
 Where possible, the algorithms should match as closely as possible the ORB-SLAM implementation.
-For example, the Harris corner measure applies a Sobel operator because the OpenCV version
-does the same, however considers only a 6x6 patch instead of 7x7 due to the NEON register width.
+For example, the Harris corner measure first applies a Sobel operator because the OpenCV version
+does the same, however it considers only a 6x6 patch instead of 7x7 due to the NEON register width.
 
-Currently, the released code is only the SLAM frontend, i.e. the feature extraction code.
+Currently, the released code is only the SLAM frontend, i.e. the ORB extraction code.
 The performance section shows that these above targets have been achieved.
 
 Usage
@@ -47,8 +47,8 @@ This code extracts FAST points from a single level of the pyramid.
   pislam::orbCompute<640, 8>(img, keypoints, descriptors);
 ```
 
-Each above function is well documented in the source. Template parameters have
-been used for `vstep` and `border` width, which allow gcc to use constant
+Each of the above functions is well documented in the source code. Template parameters have
+been used for `vstep` and `border` width, allowing gcc to use constant
 offsets. Because ARM instructions permit only immediate relative addresses between
 -4096 to 4095, try to keep vstep small. For context, if gcc cannot use
 constant offsets for the ORB descriptor pattern, the code size will double.
@@ -114,7 +114,7 @@ The charts below were produced using 200 frames from Sample 3 of the New College
 ![Stage Execution Time](doc/stage_times.png?raw=true "Stage Execution Time")
 
 
-The images were first scaled up to VGA format, and then blurred using a 5x5 kernel.
+Images are first scaled up to VGA format, and then blurred using a 5x5 kernel.
 The pyramids were then computed and used as input to the test program.
 
 Further, other tests (not included in this release) have shown that feature matching
@@ -126,12 +126,12 @@ Demo
 ---
 
 The below image was produced by computing the ORB features in four keyframes, and
-paths of the best matches within a 20 pixel radius are traced through subsequent frames.
+then tracing the paths of best matches within a 20 pixel radius.
 Images used are the same sequence that generated the performance graphs.
 
 ![Demo](doc/demo.gif?raw=true "New College Sample3 - Private Sign")
 
-Note that foreground points are lost as scale changes are not compensated for.
+Note that foreground points are lost because the demo does not compensate for scale changes.
 
 Tests
 ---
