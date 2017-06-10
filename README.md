@@ -108,14 +108,20 @@ Performance compromises include the following:
  * Approximate vectorized atan2 function, average error less than half a degree.
 
 The charts below were produced using 200 frames from Sample 3 of the New College SLAM data sets.
-<http://www.robots.ox.ac.uk/NewCollegeData/index.php?n=Main.Downloads>
+<http://www.robots.ox.ac.uk/NewCollegeData/index.php?n=Main.Downloads>. 
+Images are first scaled up to VGA format, and then blurred using a 5x5 kernel.
+The pyramids are then computed and used as input to the test program.
 
 ![Frame Execution Time](doc/frame_times.png?raw=true "Frame Execution Time")
 ![Stage Execution Time](doc/stage_times.png?raw=true "Stage Execution Time")
 
-
-Images are first scaled up to VGA format, and then blurred using a 5x5 kernel.
-The pyramids were then computed and used as input to the test program.
+For comparison, to extract 1000 ORB points the OpenCV detection implementation
+(everything before the ORB descriptors) requires 50-60ms.
+The ORB descriptor implementation has a large overhead,
+since OpenCV will copy the image and blur it using 7x7 kernel.
+PiSlam skips this step since input images are assumed to be blurred.
+After subtracting the constant overhead, OpenCV requires 10ms to compute the 1000 descriptors.
+Therefore our implementation is 2-3 times faster depending on how one measures.
 
 Further, other tests (not included in this release) have shown that feature matching
 can be achieved in under 20 ms per frame using [flann](https://github.com/mariusmuja/flann).
