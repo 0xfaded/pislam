@@ -110,6 +110,10 @@ Performance compromises include the following:
 The charts below were produced using 200 frames from Sample 3 of the New College SLAM data sets.
 <http://www.robots.ox.ac.uk/NewCollegeData/index.php?n=Main.Downloads>
 
+[Frame Execution Time]: https://raw.githubusercontent.com/0xfaded/pislam/master/doc/frame_times.png "Frame Exection Time"
+[Stage Execution Time]: https://raw.githubusercontent.com/0xfaded/pislam/master/doc/stage_times.png "Stage Exection Time"
+
+
 The images were first scaled up to VGA format, and then blurred using a 5x5 kernel.
 The pyramids were then computed and used as input to the test program.
 
