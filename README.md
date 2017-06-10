@@ -129,6 +129,10 @@ The below image was produced by computing the ORB features in four keyframes, an
 paths of the best matches within a 20 pixel radius are traced through subsequent frames.
 Images used are the same sequence that generated the performance graphs.
 
+![Demo](doc/demo.gif?raw=true "New College Sample3 - Private Sign")
+
+Note that foreground points are lost as scale changes are not compensated for.
+
 Tests
 ---
 
