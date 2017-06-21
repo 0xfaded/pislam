@@ -95,7 +95,7 @@ Four separate steps comprise the ORB extraction process.
 
 Unlike other FAST implementations which try to detect non-features and abort quickly,
 PiSlam uses a pure SIMD implementation. Therefore the running time is constant and
-easy to quantify at 16ms on a Raspberry Pi 3, making it the most expensive stage.
+easy to quantify at 8.4ms on a Raspberry Pi 3, making it the most expensive stage.
 
 All other stages are dependent on the number of points detected, but empirical
 results show that the frontend can comfortably handle up to 2000 ORB features
@@ -121,7 +121,7 @@ The ORB descriptor implementation has a large overhead,
 since OpenCV will copy the image and blur it using 7x7 kernel.
 PiSlam skips this step since input images are assumed to be blurred.
 After subtracting the constant overhead, OpenCV requires 10ms to compute the 1000 descriptors.
-Therefore our implementation is 2-3 times faster depending on how one measures.
+Therefore our implementation is 3-4 times faster depending on how one measures.
 
 Further, other tests (not included in this release) have shown that feature matching
 can be achieved in under 20 ms per frame using [flann](https://github.com/mariusmuja/flann).
