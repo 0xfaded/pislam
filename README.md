@@ -135,7 +135,7 @@ The below image was produced by computing the ORB features in four keyframes, an
 then tracing the paths of best matches within a 20 pixel radius.
 Images used are the same sequence that generated the performance graphs.
 
-![Demo](doc/demo.gif?raw=true "New College Sample3 - Private Sign")
+[![Demo](doc/out005.png?raw=true)](https://www.youtube.com/watch?v=zv2aqzKjivA "ORB feature extraction demo")
 
 Note that foreground points are lost because the demo does not compensate for scale changes.
 
