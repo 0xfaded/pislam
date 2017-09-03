@@ -3,6 +3,10 @@ PiSlam
 
 Real-time feature extraction on the Raspberry Pi and other ARM processors supporting NEON.
 
+License
+---
+GPLv3. Contact carlchatfield@gmail.com if interested in non-restrictive licensing.
+
 Design Goals
 ---
 
