@@ -16,12 +16,8 @@ namespace pislam {
 template<int vstep>
 void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
 
-  // If the user specifies height mod 8 === 1, last row is not processed
-  int vblocks = (height + 6) / 8;
+  int vblocks = (height + 7) / 8;
   int hblocks = (width + 15) / 16;
-
-  std::cout << height << " " << hblocks << std::endl;
-  std::cout << width << " " << vblocks << std::endl;
 
   int step = 2*vstep;
 
@@ -34,6 +30,9 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
     uint8_t *ptr2 = &img[1][i*16];
 
     bool vfix = false;
+
+    // if height % 8 == 1, two fixes are required.
+    bool vfix2 = false;
 
   // first two rows
   asm(
@@ -52,8 +51,9 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
     : "r"(step)
     : PISLAM_ALL_D_REGS);
 
-    int j = 2;
-    for (; j < height-8; j += 8) {
+    // Check for case where reflected rows straddle block boundary.
+    int j = (height & 7) == 1 ? 1 : 0;
+    for (; j < vblocks-1; j += 1) {
 
   asm(
     // next two blocks
@@ -153,87 +153,8 @@ last_block:
       continue;
     }
 
-    switch((unsigned int)(height-j) & 7) {
+    switch(height & 7) {
       case 0:
-  asm(
-    "vmov         q4, q2\n\t"
-    "vmov         q5, q1\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 1:
-  asm(
-    "vld1.8       {d8,d9}, [%0]\n\t"
-    "vmov         q5, q3\n\t"
-    "vmov         q6, q2\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 2:
-  asm(
-    "vld1.8       {d8,d9}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d10,d11}, [%1]\n\t"
-    "vmov         q6, q4\n\t"
-    "vmov         q7, q3\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 3:
-  asm(
-    "vld1.8       {d8,d9}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d10,d11}, [%1]\n\t"
-    "add          %1, %3\n\t"
-    "vld1.8       {d12,d13}, [%0]\n\t"
-    "vmov         q7, q5\n\t"
-    "vmov         q8, q4\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 4:
-  asm(
-    "vld1.8       {d8,d9}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d10,d11}, [%1]\n\t"
-    "add          %1, %3\n\t"
-    "vld1.8       {d12,d13}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d14,d15}, [%1]\n\t"
-    "vmov         q8, q6\n\t"
-    "vmov         q9, q5\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 5:
-  asm(
-    "vld1.8       {d8,d9}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d10,d11}, [%1]\n\t"
-    "add          %1, %3\n\t"
-    "vld1.8       {d12,d13}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d14,d15}, [%1]\n\t"
-    "add          %1, %3\n\t"
-    "vld1.8       {d16,d17}, [%0]\n\t"
-    "vmov         q9, q7\n\t"
-    "vmov         q10, q6\n\t"
-    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-    : "r"(step)
-    : PISLAM_ALL_D_REGS);
-        break;
-
-      case 6:
   asm(
     "vld1.8       {d8,d9}, [%0]\n\t"
     "add          %0, %3\n\t"
@@ -253,9 +174,99 @@ last_block:
     : PISLAM_ALL_D_REGS);
         break;
 
+      case 1:
+        // If someone passed a (rows % 8) == 1, they were mean.
+        // Both sides of the block boundary need to be fixed.
+        if (vfix2) {
+          asm(
+            "vmov         q4, q0\n\t"
+            ::: PISLAM_ALL_D_REGS);
+        } else {
+          asm(
+            "vld1.8       {d8,d9}, [%0]\n\t"
+            "add          %0, %3\n\t"
+            "vld1.8       {d10,d11}, [%1]\n\t"
+            "add          %1, %3\n\t"
+            "vld1.8       {d12,d13}, [%0]\n\t"
+            "add          %0, %3\n\t"
+            "vld1.8       {d14,d15}, [%1]\n\t"
+            "add          %1, %3\n\t"
+            "vld1.8       {d16,d17}, [%0]\n\t"
+            "add          %0, %3\n\t"
+            "vld1.8       {d18,d19}, [%1]\n\t"
+            "add          %1, %3\n\t"
+            "vld1.8       {d20,d21}, [%0]\n\t"
+            "vmov         q11, q9\n\t"
+            : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
+            : "r"(step)
+            : PISLAM_ALL_D_REGS);
+
+          // go straight back to last_block for other side
+          vfix2 = true;
+          goto last_block;
+        }
+        break;
+
+      case 2:
+  asm(
+    "vmov         q4, q2\n\t"
+    "vmov         q5, q1\n\t"
+    ::: PISLAM_ALL_D_REGS);
+        break;
+
+      case 3:
+  asm(
+    "vld1.8       {d8,d9}, [%0]\n\t"
+    "vmov         q5, q3\n\t"
+    "vmov         q6, q2\n\t"
+    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
+    : "r"(step)
+    : PISLAM_ALL_D_REGS);
+        break;
+
+      case 4:
+  asm(
+    "vld1.8       {d8,d9}, [%0]\n\t"
+    "add          %0, %3\n\t"
+    "vld1.8       {d10,d11}, [%1]\n\t"
+    "vmov         q6, q4\n\t"
+    "vmov         q7, q3\n\t"
+    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
+    : "r"(step)
+    : PISLAM_ALL_D_REGS);
+        break;
+
+      case 5:
+  asm(
+    "vld1.8       {d8,d9}, [%0]\n\t"
+    "add          %0, %3\n\t"
+    "vld1.8       {d10,d11}, [%1]\n\t"
+    "add          %1, %3\n\t"
+    "vld1.8       {d12,d13}, [%0]\n\t"
+    "vmov         q7, q5\n\t"
+    "vmov         q8, q4\n\t"
+    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
+    : "r"(step)
+    : PISLAM_ALL_D_REGS);
+        break;
+
+      case 6:
+  asm(
+    "vld1.8       {d8,d9}, [%0]\n\t"
+    "add          %0, %3\n\t"
+    "vld1.8       {d10,d11}, [%1]\n\t"
+    "add          %1, %3\n\t"
+    "vld1.8       {d12,d13}, [%0]\n\t"
+    "add          %0, %3\n\t"
+    "vld1.8       {d14,d15}, [%1]\n\t"
+    "vmov         q8, q6\n\t"
+    "vmov         q9, q5\n\t"
+    : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
+    : "r"(step)
+    : PISLAM_ALL_D_REGS);
+        break;
+
       case 7:
-        // Case 7 implies someone passed a (rows % 8) == 1.
-        // They lose a row, because they were mean.
   asm(
     "vld1.8       {d8,d9}, [%0]\n\t"
     "add          %0, %3\n\t"
@@ -266,15 +277,15 @@ last_block:
     "vld1.8       {d14,d15}, [%1]\n\t"
     "add          %1, %3\n\t"
     "vld1.8       {d16,d17}, [%0]\n\t"
-    "add          %0, %3\n\t"
-    "vld1.8       {d18,d19}, [%1]\n\t"
-    "add          %1, %3\n\t"
-    "vld1.8       {d20,d21}, [%0]\n\t"
-    "vmov         q11, q9\n\t"
+    "vmov         q9, q7\n\t"
+    "vmov         q10, q6\n\t"
     : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
     : "r"(step)
     : PISLAM_ALL_D_REGS);
-      }
+        break;
+  }
+
+
 
       vfix = true;
       goto last_block;
