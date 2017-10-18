@@ -24,8 +24,8 @@ include_directories(
   "${GTEST_INCLUDE_DIRS}"
   )
  
-add_executable(GaussianBlurTest
-  test/GaussianBlurTest.cpp
+add_executable(GaussianTest
+  test/GaussianTest.cpp
   )
-target_link_libraries(GaussianBlurTest ${GTEST_BOTH_LIBRARIES})
+target_link_libraries(GaussianTest ${GTEST_BOTH_LIBRARIES})
 

@@ -522,8 +522,8 @@ hload_skip:
             ::: PISLAM_ALL_D_REGS);
           } else { // remainder == 6
             asm(
-              "vmov         d22, d21\n\t"
-              "vmov         d23, d18\n\t"
+              "vmov         d22, d18\n\t"
+              "vmov         d23, d21\n\t"
             ::: PISLAM_ALL_D_REGS);
           }
         }
@@ -600,7 +600,7 @@ hstore8:
           PISLAM_BLUR_COMPUTE_LAST(d31, d30, d27, d26, d14, d15, d16);
         } else {
           // these are the worst cases, since we need to reload lost values
-          ptr3 -= 512;
+          ptr3 -= vblocks*128;
           asm(
             "vld4.8       {d16,d18,d20,d22}, [%2]!\n\t"
             "vld4.8       {d17,d19,d21,d23}, [%2]\n\t"
