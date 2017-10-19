@@ -209,10 +209,106 @@ vlast:
         "vrhadd.u8     q6, q6, q14\n\t"
         "vrhadd.u8     q7, q7, q15\n\t"
 
-        "vst4.32      {d0,d2,d4,d6}, [%2]!\n\t"
-        "vst4.32      {d8,d10,d12,d14}, [%2]!\n\t"
-        "vst4.32      {d1,d3,d5,d7}, [%2]!\n\t"
+        // load previous 4 columns
+        "vld1.u8       {d16-d19}, [%hleft]!\n\t"
+        
+        // transpose result for horizontal pass
+        "vswp          d1, d8\n\t"
+        "vswp          d3, d10\n\t"
+        "vswp          d5, d12\n\t"
+        "vswp          d7, d14\n\t"
 
+        "vtrn.32       q0, q2\n\t"
+        "vtrn.32       q1, q3\n\t"
+        "vtrn.32       q4, q6\n\t"
+        "vtrn.32       q5, q7\n\t"
+
+        "vtrn.16       q0, q1\n\t"
+        "vtrn.16       q2, q3\n\t"
+        "vtrn.16       q4, q5\n\t"
+        "vtrn.16       q6, q7\n\t"
+
+        "vld1.u8       {d20-d23}, [%hleft]\n\t"
+        "sub           %hleft, #32\n\t"
+
+        "vuzp.8        d0, d1\n\t"
+        "vuzp.8        d2, d3\n\t"
+        "vuzp.8        d4, d5\n\t"
+        "vuzp.8        d6, d7\n\t"
+        "vuzp.8        d8, d9\n\t"
+        "vuzp.8        d10, d11\n\t"
+        "vuzp.8        d12, d13\n\t"
+        "vuzp.8        d14, d15\n\t"
+
+        // long delta
+        "vrhadd.u8     q10, q8, q0\n\t"
+        "vrhadd.u8     q11, q9, q1\n\t"
+        "vrhadd.u8     q14, q0, q2\n\t"
+        "vrhadd.u8     q15, q1, q3\n\t"
+
+        "vrhadd.u8     q10, q9\n\t"
+        "vrhadd.u8     q11, q0\n\t"
+        "vrhadd.u8     q14, q1\n\t"
+        "vrhadd.u8     q15, q2\n\t"
+
+        "vrhadd.u8     q10, q9\n\t"
+        "vrhadd.u8     q11, q0\n\t"
+        "vrhadd.u8     q14, q1\n\t"
+        "vrhadd.u8     q15, q2\n\t"
+
+        // short delta
+        "vrhadd.u8     d16, d4, d6\n\t"
+        "vrhadd.u8     d17, d17, d19\n\t"
+        "vrhadd.u8     q9, q9, q0\n\t"
+        "vrhadd.u8     q0, q0, q1\n\t"
+        "vrhadd.u8     q1, q1, q2\n\t"
+
+        // combine
+        "vrhadd.u8     d20, d17\n\t"
+        "vrhadd.u8     d21, d18\n\t"
+        "vrhadd.u8     d22, d19\n\t"
+        "vrhadd.u8     d23, d0\n\t"
+        "vrhadd.u8     d28, d1\n\t"
+        "vrhadd.u8     d29, d2\n\t"
+        "vrhadd.u8     d30, d3\n\t"
+        "vrhadd.u8     d31, d16\n\t"
+
+        // long delta
+        "vrhadd.u8     q8, q2, q4\n\t"
+        "vrhadd.u8     q9, q3, q5\n\t"
+        "vrhadd.u8     q2, q4, q6\n\t"
+        "vrhadd.u8     q3, q5, q7\n\t"
+
+        "vrhadd.u8     q8, q3\n\t"
+        "vrhadd.u8     q9, q4\n\t"
+        "vrhadd.u8     q2, q5\n\t"
+        "vrhadd.u8     q3, q6\n\t"
+
+        // compute short deltas early to free up register
+        "vrhadd.u8     d14, d12, d14\n\t"
+        "vrhadd.u8     d15, d3, d5\n\t"
+
+        "vrhadd.u8     q8, q3\n\t"
+        "vrhadd.u8     q9, q4\n\t"
+        "vrhadd.u8     q2, q5\n\t"
+        "vrhadd.u8     q3, q6\n\t"
+
+        // combine and free up q7
+        "vrhadd.u8     d0, d16, d15\n\t"
+        "vrhadd.u8     d7, d3, d14\n\t"
+
+        // short delta
+        "vrhadd.u8     q7, q5, q6\n\t"
+        "vrhadd.u8     q6, q4, q5\n\t"
+        "vrhadd.u8     q5, q3, q4\n\t"
+
+        // combine
+        "vrhadd.u8     d1, d17, d6\n\t"
+        "vrhadd.u8     d2, d18, d7\n\t"
+        "vrhadd.u8     d3, d19, d8\n\t"
+        "vrhadd.u8     d4, d0, d9\n\t"
+        "vrhadd.u8     d5, d1, d10\n\t"
+        "vrhadd.u8     d6, d2, d11\n\t"
         // shuffle registers for next loop iteration.
         // pipeline is stalled on stores regardless
         "vmov         q0, q8\n\t"
