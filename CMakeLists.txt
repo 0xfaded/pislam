@@ -24,8 +24,17 @@ include_directories(
   "${GTEST_INCLUDE_DIRS}"
   )
  
+add_library(TestUtil SHARED
+  test/TestUtil.cpp
+  )
+
 add_executable(GaussianTest
   test/GaussianTest.cpp
   )
-target_link_libraries(GaussianTest ${GTEST_BOTH_LIBRARIES})
+target_link_libraries(GaussianTest TestUtil ${GTEST_BOTH_LIBRARIES})
+
+add_executable(BilinearTest
+  test/BilinearTest.cpp
+  )
+target_link_libraries(BilinearTest TestUtil ${GTEST_BOTH_LIBRARIES})
 
