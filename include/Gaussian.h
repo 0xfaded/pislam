@@ -124,9 +124,10 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
 
     // Check for case where reflected rows straddle block boundary.
     int j = (height & 7) == 1 ? 1 : 0;
+    bool vfix = false;
+    bool vfix2 = false;
+    bool hfix2 = false;
     for (; j < vblocks-1; j += 1) {
-      std::cout << j << " " << (void *)img << " " << (void*)in0 << " " << (void*)out0 << std::endl;
-      std::cout << (void *)hstore << " " << (void *)hstore_ptr << std::endl;
 
       asm volatile(
         // next blocks
@@ -150,6 +151,7 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         : [step] "r"(step)
         : PISLAM_ALL_D_REGS);
 
+vlast:
       asm volatile(
         // long delta
         "vrhadd.u8     q12, q0, q4\n\t"
@@ -207,7 +209,6 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         "vrhadd.u8     q6, q6, q14\n\t"
         "vrhadd.u8     q7, q7, q15\n\t"
 
-#if 1
         // load previous 4 columns
         "vld1.u8       {d20-d23}, [%[hstore]]\n\t"
         
@@ -239,6 +240,15 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         // q6-q7 become the new previous left rows
         "vst1.u8       {d12-d15}, [%[hstore]]!\n\t"
 
+        : [hstore] "+r"(hstore_ptr) :: PISLAM_ALL_D_REGS);
+
+      // this monstrosity has no place in my inner loop
+      if (i == hblocks - 1) {
+        goto hblock_fix;
+      }
+hlast:
+
+      asm volatile(
         // long delta
         "vrhadd.u8     q12, q10, q0\n\t"
         "vrhadd.u8     q13, q11, q1\n\t"
@@ -339,16 +349,6 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         "vswp         d31, d6\n\t"
 
         // store finished block
-#if 0
-        "vst1.8       {d16,d17}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d18,d19}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-        "vst1.8       {d20,d21}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d22,d23}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-#else
         "vst1.8       {d24,d25}, [%[out0]]\n\t"
         "add          %[out0], %[step]\n\t"
         "vst1.8       {d26,d27}, [%[out1]]\n\t"
@@ -357,7 +357,6 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         "add          %[out0], %[step]\n\t"
         "vst1.8       {d30,d31}, [%[out1]]\n\t"
         "add          %[out1], %[step]\n\t"
-#endif
         "vst1.8       {d0,d1}, [%[out0]]\n\t"
         "add          %[out0], %[step]\n\t"
         "vst1.8       {d2,d3}, [%[out1]]\n\t"
@@ -372,25 +371,6 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         "vmov         q1, q9\n\t"
         "vmov         q2, q10\n\t"
         "vmov         q3, q11\n\t"
-#else
-        "vst1.8       {d0,d1}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d2,d3}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-        "vst1.8       {d4,d5}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d6,d7}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-        "vst1.8       {d8,d9}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d10,d11}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-        "vst1.8       {d12,d13}, [%[out0]]\n\t"
-        "add          %[out0], %[step]\n\t"
-        "vst1.8       {d14,d15}, [%[out1]]\n\t"
-        "add          %[out1], %[step]\n\t"
-
-#endif
 
         : [out0] "+r"(out0), [out1] "+r"(out1),
           [in0] "+r"(in0), [in1] "+r"(in1),
@@ -398,6 +378,209 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
         : [step] "r"(step)
         : PISLAM_ALL_D_REGS);
 
+      continue;
+
+hblock_fix:
+#define PISLAM_GAUSSIAN_REFLECT_COLS(c0, c1, c3, c4) \
+        asm volatile(\
+          "vmov         " #c0 ", " #c4 "\n\t" \
+          "vmov         " #c1 ", " #c3 "\n\t" \
+          ::: #c3, #c4)
+
+      uint32_t remainder = width & 0xf;
+      switch (remainder) {
+        case 0:
+          PISLAM_GAUSSIAN_REFLECT_COLS(d15, d14, d12, d11);
+          goto hlast;
+        case 1:
+          // the diablocial case where the reflection straddles the border
+          if (hfix2) {
+            asm volatile(\
+              "vmov         d0, d20\n\t"
+              ::: "d0");
+          } else {
+            asm volatile(\
+              "vmov         d15, d13\n\t"
+              ::: "d13");
+            hfix2 = !hfix2;
+            i -= 1;
+          }
+          goto hlast;
+        case 2:
+          PISLAM_GAUSSIAN_REFLECT_COLS(d1, d0, d22, d21);
+          goto hlast;
+        case 3:
+          PISLAM_GAUSSIAN_REFLECT_COLS(d2, d1, d23, d22);
+          goto hlast;
+        case 4:
+          PISLAM_GAUSSIAN_REFLECT_COLS(d3, d2, d23, d0);
+          goto hlast;
+        case 5:
+          PISLAM_GAUSSIAN_REFLECT_COLS(d4, d3, d1, d0);
+          goto hlast;                                 
+        case 6:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d5, d4, d2, d1);
+          goto hlast;                                 
+        case 7:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d6, d5, d3, d2);
+          goto hlast;                                 
+        case 8:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d7, d6, d4, d3);
+          goto hlast;
+        case 9:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d8, d7, d5, d4);
+          goto hlast;
+        case 10:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d9, d8, d6, d5);
+          goto hlast;
+        case 11:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d10, d9, d7, d6);
+          goto hlast;
+        case 12:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d11, d10, d8, d7);
+          goto hlast;
+        case 13:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d12, d11, d9, d8);
+          goto hlast;
+        case 14:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d13, d12, d10, d9);
+          goto hlast;
+        case 15:                                  
+          PISLAM_GAUSSIAN_REFLECT_COLS(d14, d13, d11, d10);
+          goto hlast;
+      }
+    }
+
+    if (vfix) {
+      continue;
+    }
+    vfix = true;
+
+    // handle odd number of rows by reflecting the last two valid rows.
+    switch(height & 7) {
+    case 0:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d12,d13}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d14,d15}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d16,d17}, [%[in0]]\n\t"
+        "vld1.8       {d18,d19}, [%[in1]]\n\t"
+        "vmov         q10, q8\n\t"
+        "vmov         q11, q7\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+            goto vlast;
+
+    case 1:
+      // If someone passed a (rows % 8) == 1, they were mean.
+      // Both sides of the block boundary need to be fixed.
+      if (vfix2) {
+        asm volatile(
+          "vmov         q4, q0\n\t"
+          ::: PISLAM_ALL_D_REGS);
+      } else {
+        asm volatile(
+          "vld1.8       {d8,d9}, [%[in0]]\n\t"
+          "add          %[in0], %[step]\n\t"
+          "vld1.8       {d10,d11}, [%[in1]]\n\t"
+          "add          %[in1], %[step]\n\t"
+          "vld1.8       {d12,d13}, [%[in0]]\n\t"
+          "add          %[in0], %[step]\n\t"
+          "vld1.8       {d14,d15}, [%[in1]]\n\t"
+          "add          %[in1], %[step]\n\t"
+          "vld1.8       {d16,d17}, [%[in0]]\n\t"
+          "add          %[in0], %[step]\n\t"
+          "vld1.8       {d18,d19}, [%[in1]]\n\t"
+          "vld1.8       {d20,d21}, [%[in0]]\n\t"
+          "vmov         q11, q9\n\t"
+          : [in0] "+r"(in0), [in1] "+r"(in1)
+          : [step] "r"(step)
+          : PISLAM_ALL_D_REGS);
+
+        // go straight back to vlast for other side
+        vfix2 = true;
+        goto vlast;
+      }
+      goto vlast;
+
+    case 2:
+      asm volatile(
+        "vmov         q4, q2\n\t"
+        "vmov         q5, q1\n\t"
+        ::: PISLAM_ALL_D_REGS);
+      goto vlast;
+
+    case 3:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "vmov         q5, q3\n\t"
+        "vmov         q6, q2\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+      goto vlast;
+
+    case 4:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "vmov         q6, q4\n\t"
+        "vmov         q7, q3\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+      goto vlast;
+
+    case 5:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "vld1.8       {d12,d13}, [%[in0]]\n\t"
+        "vmov         q7, q5\n\t"
+        "vmov         q8, q4\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+      goto vlast;
+
+    case 6:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d12,d13}, [%[in0]]\n\t"
+        "vld1.8       {d14,d15}, [%[in1]]\n\t"
+        "vmov         q8, q6\n\t"
+        "vmov         q9, q5\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+      goto vlast;
+
+    case 7:
+      asm volatile(
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d12,d13}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d14,d15}, [%[in1]]\n\t"
+        "vld1.8       {d16,d17}, [%[in0]]\n\t"
+        "vmov         q9, q7\n\t"
+        "vmov         q10, q6\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
+      goto vlast;
     }
   }
 
