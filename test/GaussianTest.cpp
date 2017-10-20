@@ -18,7 +18,7 @@ static void reference(const int vstep, const int width,
     const int height, uint8_t *m);
 
 TEST_P(GaussianTest, spiral) {
-  constexpr size_t vstep = 64;
+  constexpr size_t vstep = 48;
 
   size_t width = ::testing::get<0>(GetParam());
   size_t height = ::testing::get<1>(GetParam());
@@ -50,14 +50,19 @@ TEST_P(GaussianTest, spiral) {
     }
   }
 
+  std::fill(spiral,spiral+vstep*vstep,0);
+
+  for (int i= 0; i < vstep; i += 1) {
+    spiral[i*vstep + i] = 255;
+  }
+
   std::copy(spiral, spiral+height*vstep, a);
   std::copy(spiral, spiral+height*vstep, b);
 
   reference(vstep, width, height, a);
-  pislam::gaussian5x5<vstep>(width, height, (uint8_t (*)[vstep])b);
 
 
-#if 0
+#if 1
   for (size_t i = 0; i < height; i += 1) {
     for (size_t j = 0; j < width; j += 1) {
       std::cout << std::setw(3) << (int)spiral[i*vstep+j] << " ";
@@ -74,6 +79,7 @@ TEST_P(GaussianTest, spiral) {
   }
   std::cout << std::endl;
 
+  pislam::gaussian5x5<vstep>(width, height, (uint8_t (*)[vstep])b);
   for (size_t i = 0; i < height; i += 1) {
     for (size_t j = 0; j < width; j += 1) {
       std::cout << std::setw(3) << (int)b[i*vstep+j] << " ";
@@ -81,6 +87,7 @@ TEST_P(GaussianTest, spiral) {
     std::cout << std::endl;
   }
 
+  /*
   for (size_t i = 0; i < height; i += 1) {
     for (size_t j = 0; j < width; j += 1) {
       if (a[i*vstep+j] != b[i*vstep+j]) {
@@ -88,6 +95,7 @@ TEST_P(GaussianTest, spiral) {
       }
     }
   }
+  */
 #else
   for (size_t i = 0; i < height; i += 1) {
     for (size_t j = 0; j < width; j += 1) {
@@ -131,8 +139,8 @@ TEST_P(GaussianTest, random) {
 INSTANTIATE_TEST_CASE_P(
     DimensionTest,
     GaussianTest,
-    Combine(Range(16, 33), Range(16, 33)));
-    //Combine(Values(64), Values(64)));
+    //Combine(Range(16, 33), Range(16, 33)));
+    Combine(Values(32), Values(32)));
 
 static void reference(const int vstep, const int width,
     const int height, uint8_t *m) {

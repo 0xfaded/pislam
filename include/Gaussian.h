@@ -92,65 +92,63 @@ void gaussian5x5(const int width, const int height, uint8_t img[][vstep]) {
   int vblocks = (height + 7) / 8;
   int hblocks = (width + 15) / 16;
 
+  uint8_t *hstore = new uint8_t[hblocks * 64]();
   int step = 2*vstep;
 
-  uint8_t *buffer = new uint8_t[vblocks*hblocks*128];
-
-  // vertical pass
-  uint8_t *ptr3 = buffer;
   for (int i = 0; i < hblocks; i += 1) {
-    uint8_t *ptr1 = &img[0][i*16];
-    uint8_t *ptr2 = &img[1][i*16];
+    // unaligned accesses are cheap compared to the monstrosity
+    // required to handle the horizontal read ahead.
+    uint8_t *in0 = &img[0][i*16+2];
+    uint8_t *in1 = &img[1][i*16+2];
+    uint8_t *out0 = &img[0][i*16];
+    uint8_t *out1 = &img[1][i*16];
 
-    bool vfix = false;
-
-    // if height % 8 == 1, two fixes are required.
-    bool vfix2 = false;
+    uint8_t *hstore_ptr = hstore;
 
     // first two rows
     asm volatile(
       // load two rows and reflect them to mimic the
       // tail of a previous block.
-      "vld1.8       {d4,d5}, [%0]\n\t"
-      "add          %0, %3\n\t"
-      "vld1.8       {d6,d7}, [%1]\n\t"
-      "add          %1, %3\n\t"
+      "vld1.8       {d4,d5}, [%[in0]]\n\t"
+      "add          %[in0], %[step]\n\t"
+      "vld1.8       {d6,d7}, [%[in1]]\n\t"
+      "add          %[in1], %[step]\n\t"
 
       // This reflected load will be loaded twice,
-      "vld1.8       {d0,d1}, [%0]\n\t"
+      "vld1.8       {d0,d1}, [%[in0]]\n\t"
       "vmov         q1, q3\n\t"
 
-      : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-      : "r"(step)
+      : [in0] "+r"(in0), [in1] "+r"(in1)
+      : [step] "r"(step)
       : PISLAM_ALL_D_REGS);
 
     // Check for case where reflected rows straddle block boundary.
     int j = (height & 7) == 1 ? 1 : 0;
     for (; j < vblocks-1; j += 1) {
+      std::cout << j << " " << (void *)img << " " << (void*)in0 << " " << (void*)out0 << std::endl;
+      std::cout << (void *)hstore << " " << (void *)hstore_ptr << std::endl;
 
       asm volatile(
         // next blocks
-        "vld1.8       {d8,d9}, [%0]\n\t"
-        "add          %0, %3\n\t"
-        "vld1.8       {d10,d11}, [%1]\n\t"
-        "add          %1, %3\n\t"
-        "vld1.8       {d12,d13}, [%0]\n\t"
-        "add          %0, %3\n\t"
-        "vld1.8       {d14,d15}, [%1]\n\t"
-        "add          %1, %3\n\t"
-        "vld1.8       {d16,d17}, [%0]\n\t"
-        "add          %0, %3\n\t"
-        "vld1.8       {d18,d19}, [%1]\n\t"
-        "add          %1, %3\n\t"
-        "vld1.8       {d20,d21}, [%0]\n\t"
-        "add          %0, %3\n\t"
-        "vld1.8       {d22,d23}, [%1]\n\t"
-        "add          %1, %3\n\t"
-        : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-        : "r"(step)
-        : PISLAM_ALL_D_REGS);
+        "vld1.8       {d8,d9}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d10,d11}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d12,d13}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d14,d15}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+        "vld1.8       {d16,d17}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d18,d19}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
 
-vlast:
+        // last two rows need to be reloaded, dont increment pointers
+        "vld1.8       {d20,d21}, [%[in0]]\n\t"
+        "vld1.8       {d22,d23}, [%[in1]]\n\t"
+        : [in0] "+r"(in0), [in1] "+r"(in1)
+        : [step] "r"(step)
+        : PISLAM_ALL_D_REGS);
 
       asm volatile(
         // long delta
@@ -209,8 +207,9 @@ vlast:
         "vrhadd.u8     q6, q6, q14\n\t"
         "vrhadd.u8     q7, q7, q15\n\t"
 
+#if 1
         // load previous 4 columns
-        "vld1.u8       {d16-d19}, [%hleft]!\n\t"
+        "vld1.u8       {d20-d23}, [%[hstore]]\n\t"
         
         // transpose result for horizontal pass
         "vswp          d1, d8\n\t"
@@ -228,9 +227,6 @@ vlast:
         "vtrn.16       q4, q5\n\t"
         "vtrn.16       q6, q7\n\t"
 
-        "vld1.u8       {d20-d23}, [%hleft]\n\t"
-        "sub           %hleft, #32\n\t"
-
         "vuzp.8        d0, d1\n\t"
         "vuzp.8        d2, d3\n\t"
         "vuzp.8        d4, d5\n\t"
@@ -240,90 +236,176 @@ vlast:
         "vuzp.8        d12, d13\n\t"
         "vuzp.8        d14, d15\n\t"
 
+        // q6-q7 become the new previous left rows
+        "vst1.u8       {d12-d15}, [%[hstore]]!\n\t"
+
         // long delta
-        "vrhadd.u8     q10, q8, q0\n\t"
-        "vrhadd.u8     q11, q9, q1\n\t"
+        "vrhadd.u8     q12, q10, q0\n\t"
+        "vrhadd.u8     q13, q11, q1\n\t"
         "vrhadd.u8     q14, q0, q2\n\t"
         "vrhadd.u8     q15, q1, q3\n\t"
 
-        "vrhadd.u8     q10, q9\n\t"
-        "vrhadd.u8     q11, q0\n\t"
+        "vrhadd.u8     q12, q11\n\t"
+        "vrhadd.u8     q13, q0\n\t"
         "vrhadd.u8     q14, q1\n\t"
         "vrhadd.u8     q15, q2\n\t"
 
-        "vrhadd.u8     q10, q9\n\t"
-        "vrhadd.u8     q11, q0\n\t"
+        "vrhadd.u8     q12, q11\n\t"
+        "vrhadd.u8     q13, q0\n\t"
         "vrhadd.u8     q14, q1\n\t"
         "vrhadd.u8     q15, q2\n\t"
 
         // short delta
-        "vrhadd.u8     d16, d4, d6\n\t"
-        "vrhadd.u8     d17, d17, d19\n\t"
-        "vrhadd.u8     q9, q9, q0\n\t"
+        "vrhadd.u8     d20, d4, d6\n\t"
+        "vrhadd.u8     d21, d21, d23\n\t"
+        "vrhadd.u8     q11, q11, q0\n\t"
         "vrhadd.u8     q0, q0, q1\n\t"
         "vrhadd.u8     q1, q1, q2\n\t"
 
         // combine
-        "vrhadd.u8     d20, d17\n\t"
-        "vrhadd.u8     d21, d18\n\t"
-        "vrhadd.u8     d22, d19\n\t"
-        "vrhadd.u8     d23, d0\n\t"
+        "vrhadd.u8     d24, d21\n\t"
+        "vrhadd.u8     d25, d22\n\t"
+        "vrhadd.u8     d26, d23\n\t"
+        "vrhadd.u8     d27, d0\n\t"
         "vrhadd.u8     d28, d1\n\t"
         "vrhadd.u8     d29, d2\n\t"
         "vrhadd.u8     d30, d3\n\t"
-        "vrhadd.u8     d31, d16\n\t"
+        "vrhadd.u8     d31, d20\n\t"
 
         // long delta
-        "vrhadd.u8     q8, q2, q4\n\t"
-        "vrhadd.u8     q9, q3, q5\n\t"
-        "vrhadd.u8     q2, q4, q6\n\t"
-        "vrhadd.u8     q3, q5, q7\n\t"
+        "vrhadd.u8     q0, q2, q4\n\t"
+        "vrhadd.u8     q1, q3, q5\n\t"
+        "vrhadd.u8     q10, q4, q6\n\t"
+        "vrhadd.u8     q11, q5, q7\n\t"
 
-        "vrhadd.u8     q8, q3\n\t"
-        "vrhadd.u8     q9, q4\n\t"
-        "vrhadd.u8     q2, q5\n\t"
-        "vrhadd.u8     q3, q6\n\t"
+        "vrhadd.u8     q0, q3\n\t"
+        "vrhadd.u8     q1, q4\n\t"
+        "vrhadd.u8     q10, q5\n\t"
+        "vrhadd.u8     q11, q6\n\t"
 
-        // compute short deltas early to free up register
-        "vrhadd.u8     d14, d12, d14\n\t"
-        "vrhadd.u8     d15, d3, d5\n\t"
-
-        "vrhadd.u8     q8, q3\n\t"
-        "vrhadd.u8     q9, q4\n\t"
-        "vrhadd.u8     q2, q5\n\t"
-        "vrhadd.u8     q3, q6\n\t"
-
-        // combine and free up q7
-        "vrhadd.u8     d0, d16, d15\n\t"
-        "vrhadd.u8     d7, d3, d14\n\t"
+        "vrhadd.u8     q0, q3\n\t"
+        "vrhadd.u8     q1, q4\n\t"
+        "vrhadd.u8     q10, q5\n\t"
+        "vrhadd.u8     q11, q6\n\t"
 
         // short delta
+        "vrhadd.u8     d4, d12, d14\n\t"
+        "vrhadd.u8     d5, d5, d7\n\t"
+
         "vrhadd.u8     q7, q5, q6\n\t"
         "vrhadd.u8     q6, q4, q5\n\t"
         "vrhadd.u8     q5, q3, q4\n\t"
 
         // combine
-        "vrhadd.u8     d1, d17, d6\n\t"
-        "vrhadd.u8     d2, d18, d7\n\t"
-        "vrhadd.u8     d3, d19, d8\n\t"
-        "vrhadd.u8     d4, d0, d9\n\t"
-        "vrhadd.u8     d5, d1, d10\n\t"
-        "vrhadd.u8     d6, d2, d11\n\t"
+        "vrhadd.u8     d0, d0, d5\n\t"
+        "vrhadd.u8     d7, d23, d4\n\t"
+        "vrhadd.u8     d1, d1, d10\n\t"
+        "vrhadd.u8     d2, d2, d11\n\t"
+        "vrhadd.u8     d3, d3, d12\n\t"
+        "vrhadd.u8     d4, d20, d13\n\t"
+        "vrhadd.u8     d5, d21, d14\n\t"
+        "vrhadd.u8     d6, d22, d15\n\t"
+
+        // restore previous two rows of image
+        "vld1.8       {d20,d21}, [%[in0]]\n\t"
+        "add          %[in0], %[step]\n\t"
+        "vld1.8       {d22,d23}, [%[in1]]\n\t"
+        "add          %[in1], %[step]\n\t"
+
+        // untranspose. Just to make everything even more confusing,
+        // the top is now in q12-q15, and bottom in q0-q3.
+        "vzip.8       d0, d1\n\t"
+        "vzip.8       d2, d3\n\t"
+        "vzip.8       d4, d5\n\t"
+        "vzip.8       d6, d7\n\t"
+        "vzip.8       d24, d25\n\t"
+        "vzip.8       d26, d27\n\t"
+        "vzip.8       d28, d29\n\t"
+        "vzip.8       d30, d31\n\t"
+
+        "vtrn.16      q12, q13\n\t"
+        "vtrn.16      q14, q15\n\t"
+        "vtrn.16      q0, q1\n\t"
+        "vtrn.16      q2, q3\n\t"
+
+        "vtrn.32      q12, q14\n\t"
+        "vtrn.32      q13, q15\n\t"
+        "vtrn.32      q0, q2\n\t"
+        "vtrn.32      q1, q3\n\t"
+
+        "vswp         d25, d0\n\t"
+        "vswp         d27, d2\n\t"
+        "vswp         d29, d4\n\t"
+        "vswp         d31, d6\n\t"
+
+        // store finished block
+#if 0
+        "vst1.8       {d16,d17}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d18,d19}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d20,d21}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d22,d23}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+#else
+        "vst1.8       {d24,d25}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d26,d27}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d28,d29}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d30,d31}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+#endif
+        "vst1.8       {d0,d1}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d2,d3}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d4,d5}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d6,d7}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+
         // shuffle registers for next loop iteration.
-        // pipeline is stalled on stores regardless
         "vmov         q0, q8\n\t"
         "vmov         q1, q9\n\t"
-
-        "vst4.32      {d9,d11,d13,d15}, [%2]!\n\t"
-
         "vmov         q2, q10\n\t"
         "vmov         q3, q11\n\t"
+#else
+        "vst1.8       {d0,d1}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d2,d3}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d4,d5}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d6,d7}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d8,d9}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d10,d11}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
+        "vst1.8       {d12,d13}, [%[out0]]\n\t"
+        "add          %[out0], %[step]\n\t"
+        "vst1.8       {d14,d15}, [%[out1]]\n\t"
+        "add          %[out1], %[step]\n\t"
 
-        : "+r"(ptr1), "+r"(ptr2), "+r"(ptr3)
-        : "r"(step)
+#endif
+
+        : [out0] "+r"(out0), [out1] "+r"(out1),
+          [in0] "+r"(in0), [in1] "+r"(in1),
+          [hstore] "+r"(hstore_ptr)
+        : [step] "r"(step)
         : PISLAM_ALL_D_REGS);
 
-        }
+    }
+  }
+
+  delete[] hstore;
+
+  return;
+
+#if 0
         if (vfix) {
           continue;
         }
@@ -876,6 +958,7 @@ hstore8:
   }
 
   delete[] buffer;
+#endif
 }
 
 } /* namespace */
