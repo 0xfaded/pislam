@@ -6,6 +6,8 @@
 #include <ctime>
 #include <iostream>
 #include <vector>
+#include <memory>
+#include <cstddef>
 
 #include "arm_neon.h"
 
@@ -160,52 +162,64 @@ void fastScoreHarris(int width, int height,
   }
 }
 
-/// Extract FAST (or other) points with non-max suppression. Points are tested
-/// against 8 surrounding pixels for maximality.
-///
-/// Optionally, `logBucketSize` and `bucketLimit` can be specified to suppress
-/// non-max features within small regions of the image. For example,
-/// `logBucketSize = 4` and  `bucketLimit = 5` limits the number of features
-/// in a 16x16 region of the image to 5.
-///
-/// If `logBucketSize = 0`, region suppression is disabled and gcc is able to
-/// completely optimize out the added overhead.
-///
-/// Running time is < ms for a 640x480 VGA image and bucket overhead is about
-/// .1 ms.
-/// 
-template <int vstep, int border, int logBucketSize = 0, int bucketLimit = 5>
-std::vector<uint32_t> fastExtract(const int width, const int height,
-    uint8_t out[][vstep], std::vector<uint32_t> &results) {
+template <int capacity>
+struct FeatureBucket {
+  uint32_t count;
+  uint32_t bucket[capacity];
 
-  constexpr int bucketSize = 1 << logBucketSize;
-  const int numBuckets = (width - 2*border - 1) / bucketSize + 1;
-  uint32_t buckets[numBuckets][bucketLimit];
-  int counts[numBuckets];
+  uint32_t &operator[](size_t i) {
+    return bucket[i];
+  }
+
+  const uint32_t &operator[](size_t i) const {
+    return bucket[i];
+  }
+};
+
+template <int capacity, int bucketSize, int border>
+struct FeatureGrid {
+
+  FeatureGrid(int width, int height)
+    : hBuckets((width - 2*border - 1) / bucketSize + 1),
+      vBuckets((height - 2*border - 1) / bucketSize + 1),
+      numBuckets(hBuckets * vBuckets),
+      buckets(new FeatureBucket<capacity>[numBuckets]) {};
+
+  FeatureBucket<capacity> *Row(size_t i) {
+    return &buckets[hBuckets*i];
+  }
+
+  uint32_t GridReduce(int minPerFourCell, int maxPerFourCell,
+      int step, uint32_t totalDesiredFeatures);
+
+  void ExtractAndIndex(std::vector<uint32_t> &features);
+  void GetFeaturesInArea(int x, int y, int r, std::vector<uint32_t> &indices);
+
+  size_t hBuckets;
+  size_t vBuckets;
+  size_t numBuckets;
+
+  std::unique_ptr<FeatureBucket<capacity>[]> buckets;
+
+ private:
+  uint32_t GetFeatureIndex(int i, int j, int k) {
+    return featureIndex_[i*hBuckets+j] + k;
+  }
+
+  std::vector<uint32_t> featureIndex_;
+};
+
+/// Internal method for bucketing one row of feature buckets.
+template <int vstep, int border, int bucketSize, int bucketLimit>
+inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_y,
+    FeatureBucket<bucketLimit> *buckets, std::vector<uint32_t> &results) {
 
   typedef union {
     uint8_t *bytes;
     uint32_t *word;
   } aliased_uint32_ptr_t;
 
-  for (int y = border; y < height - border; y += 2) {
-    if ((logBucketSize != 0) && ((y-border) % bucketSize) == 0) {
-      if (y == border) {
-        // skip retain step on initialisation
-        for (int b = 0; b < numBuckets; b += 1) {
-          counts[b] = 0;
-        }
-      } else {
-        // retain best points and reset buckets
-        for (int b = 0; b < numBuckets; b += 1) {
-          int count = counts[b];
-          for (int i = 0; i < count; i += 1) {
-            results.push_back(buckets[b][i]);
-          }
-          counts[b] = 0;
-        }
-      }
-    }
+  for (int y = base_y; y < base_y + bucketSize; y += 2) {
     for (int x = border; x < width - border; x += 2) {
       aliased_uint32_ptr_t ptr0, ptr1, ptr2, ptr3;
 
@@ -294,45 +308,283 @@ std::vector<uint32_t> fastExtract(const int width, const int height,
 
 store:
 
-      int bucket = (x-border) / bucketSize;
-      int count = counts[bucket];
+      FeatureBucket<bucketLimit> &bucket = buckets[(x-border) / bucketSize];
+      const uint32_t count = bucket.count;
 
-      if (logBucketSize == 0) {
+      if (bucketSize == 1) {
         results.push_back(result);
       } else if (count == 0) {
         // technically case below handles count == 0, but is slightly slower.
-        buckets[bucket][0] = result;
-        counts[bucket] = 1;
+        bucket[0] = result;
+        bucket.count = 1;
       } else if (count < bucketLimit) {
         // forward insertion
         int i;
-        for (i = count - 1; i >= 0 && result < buckets[bucket][i]; i -= 1) {
+        for (i = count - 1; i >= 0 && result < bucket[i]; i -= 1) {
           // not an off by one error, count < bucket limit, therefore count-1+1 is valid.
-          buckets[bucket][i+1] = buckets[bucket][i];
+          bucket[i+1] = bucket[i];
         }
-        buckets[bucket][i+1] = result;
-        counts[bucket] = count + 1;
-      } else if (result > buckets[bucket][0]) {
+        bucket[i+1] = result;
+        bucket.count += 1;
+      } else if (result > bucket[0]) {
         // backwards insertion if we are full but result is stronger
         int i;
-        for (i = 1; i < bucketLimit && result > buckets[bucket][i]; i += 1) {
-          buckets[bucket][i-1] = buckets[bucket][i];
+        for (i = 1; i < bucketLimit && result > bucket[i]; i += 1) {
+          bucket[i-1] = bucket[i];
         }
-        buckets[bucket][i-1] = result;
+        bucket[i-1] = result;
       }
     }
   }
+}
+
+/// Extract FAST (or other) points with non-max suppression. Points are tested
+/// against 8 surrounding pixels for maximality.
+///
+/// Optionally, `logBucketSize` and `bucketLimit` can be specified to suppress
+/// non-max features within small regions of the image. For example,
+/// `logBucketSize = 4` and  `bucketLimit = 5` limits the number of features
+/// in a 16x16 region of the image to 5.
+///
+/// If `logBucketSize = 0`, region suppression is disabled and gcc is able to
+/// completely optimize out the added overhead.
+///
+/// Running time is < ms for a 640x480 VGA image and bucket overhead is about
+/// .1 ms.
+/// 
+template <int vstep, int border, int logBucketSize = 0, int bucketLimit = 5>
+void fastExtract(const int width, const int height,
+    uint8_t out[][vstep], std::vector<uint32_t> &results) {
+
+  constexpr int bucketSize = 1 << logBucketSize;
 
   if (logBucketSize != 0) {
+    const int numBuckets = (width - 2*border - 1) / bucketSize + 1;
+
+    FeatureBucket<bucketLimit> *buckets = new FeatureBucket<bucketLimit>[numBuckets];
+
     for (int b = 0; b < numBuckets; b += 1) {
-      int count = counts[b];
-      for (int i = 0; i < count; i += 1) {
-        results.push_back(buckets[b][i]);
+      buckets[b].count = 0;
+    }
+
+    for (int y = border; y < height - border; y += bucketSize) {
+      fastBucketRow<vstep, border, bucketSize, bucketLimit>(
+          width, out, y, buckets, results);
+
+      // retain best points and reset buckets
+      for (int b = 0; b < numBuckets; b += 1) {
+        const int count = buckets[b].count;
+        for (int i = 0; i < count; i += 1) {
+          results.push_back(buckets[b][i]);
+        }
+        buckets[b].count = 0;
       }
+    }
+
+    delete[] buckets;
+  } else {
+    FeatureBucket<bucketLimit> *buckets = nullptr;
+
+    // fastBucketRow operates on a minimum of two rows,
+    // and therefore this loop iterates by 2 even though bucketSize = 1
+    for (int y = border; y < height - border; y += 2) {
+      fastBucketRow<vstep, border, bucketSize, bucketLimit>(
+          width, out, y, buckets, results);
+    }
+  }
+}
+
+/*
+/// Extract FAST (or other) points with non-max suppression. Points are tested
+/// against 8 surrounding pixels for maximality.
+///
+/// Optionally, `logBucketSize` and `bucketLimit` can be specified to suppress
+/// non-max features within small regions of the image. For example,
+/// `logBucketSize = 4` and  `bucketLimit = 5` limits the number of features
+/// in a 16x16 region of the image to 5.
+///
+/// If `logBucketSize = 0`, region suppression is disabled and gcc is able to
+/// completely optimize out the added overhead.
+///
+/// Running time is < ms for a 640x480 VGA image and bucket overhead is about
+/// .1 ms.
+/// 
+template <int vstep, int border, int logBucketSize = 0, int bucketLimit = 5>
+FeatureArray<bucketLimit> fastBucket(const int width, const int height,
+    uint8_t out[][vstep], std::vector<uint32_t> &results) {
+
+  constexpr int bucketSize = 1 << logBucketSize;
+
+  if (logBucketSize != 0) {
+    const int numBuckets = (width - 2*border - 1) / bucketSize + 1;
+
+    FeatureBucket<bucketLimit> *buckets = new FeatureBucket<bucketLimit>[numBuckets];
+
+    for (int b = 0; b < numBuckets; b += 1) {
+      buckets[b].count = 0;
+    }
+
+    for (int y = border; y < height - border; y += bucketSize) {
+      fastBucketRow<vstep, border, bucketSize, bucketLimit>(
+          width, out, y, buckets, results);
+
+      // retain best points and reset buckets
+      for (int b = 0; b < numBuckets; b += 1) {
+        const int count = buckets[b].count;
+        for (int i = 0; i < count; i += 1) {
+          results.push_back(buckets[b][i]);
+        }
+        buckets[b].count = 0;
+      }
+    }
+
+    delete[] buckets;
+  } else {
+    FeatureBucket<bucketLimit> *buckets = nullptr;
+
+    // fastBucketRow operates on a minimum of two rows,
+    // and therefore this loop iterates by 2 even though bucketSize = 1
+    for (int y = border; y < height - border; y += 2) {
+      fastBucketRow<vstep, border, bucketSize, bucketLimit>(
+          width, out, y, buckets, results);
     }
   }
 
   return results;
+}
+
+*/
+template <int capacity, int bucketSize, int border>
+uint32_t FeatureGrid<capacity, bucketSize, border>::GridReduce(
+    int minPerFourCell, int maxPerFourCell,
+    int step, uint32_t totalDesiredFeatures) {
+
+  // Dealing with last row and col of buckets if vBuckets or hBuckets is
+  // odd is a pain. However, features at the edges of the image show
+  // the most variation in response to perspective change, and are therefore
+  // valuable.
+  // Therefore a decision has been made to ignore extra odd row or column
+  // and simply keep all features.
+  size_t h4Buckets = hBuckets / 2;
+  size_t v4Buckets = vBuckets / 2;
+
+  size_t num4Buckets = h4Buckets * v4Buckets;
+
+  uint32_t count = 0;
+  uint32_t counts4[num4Buckets];
+
+  const ptrdiff_t vstep = hBuckets;
+
+  size_t b = 0;
+  for (size_t y = 0; y < v4Buckets; y += 1) {
+    FeatureBucket<capacity> *tl = &buckets[y*hBuckets];
+    FeatureBucket<capacity> *bl = tl + vstep;
+
+    for (size_t x = 0; x < h4Buckets; x += 1) {
+      counts4[b] = tl[0].count + tl[1].count + bl[0].count + bl[1].count;
+      count += counts4[b];
+      b += 1;
+      tl += 2;
+      bl += 2;
+    }
+  }
+
+  minPerFourCell = std::max(minPerFourCell, 0);
+
+  for (int n = maxPerFourCell; n >= minPerFourCell; n -= step) {
+    b = 0;
+    for (size_t y = 0; y < vBuckets; y += 2) {
+      FeatureBucket<capacity> *tl = &buckets[y*hBuckets];
+      FeatureBucket<capacity> *bl = tl + vstep;
+
+      for (size_t x = 0; x < hBuckets; x += 2) {
+        uint32_t count4 = counts4[x];
+        while (count4 > n) {
+          uint32_t score = 0xffffffff;
+          FeatureBucket<capacity> *best = tl;
+
+          if (tl[0].count) {
+            score = best[0];
+          }
+          if (tl[1].count && tl[1][0] < score) {
+            best = &tl[1];
+            score = best[0];
+          }
+          if (bl[0].count && bl[0][0] < score) {
+            best = &bl[0];
+            score = best[0];
+          }
+          if (bl[1].count && bl[1][0] < score) {
+            best = &bl[1];
+          }
+
+          // remove weakest
+          best->count -= 1;
+          for (uint32_t i = 0; i < best->count; i += 1) {
+            best[i] = best[i+1];
+          }
+
+          count4 -= 1;
+          count -= 1;
+
+          if (count <= totalDesiredFeatures) {
+            return count;
+          }
+        }
+
+        counts4[b] = count4;
+        b += 1;
+        tl += 2;
+        bl += 2;
+      }
+    }
+  }
+  return count;
+}
+
+template <int capacity, int bucketSize, int border>
+void FeatureGrid<capacity, bucketSize, border>::GetFeaturesInArea(
+    const int x, const int y, const int r, std::vector<uint32_t> &indices) {
+
+  const int x0 = x - r;
+  const int y0 = y - r;
+  const int x1 = x + r;
+  const int y1 = y + r;
+
+  const int cellX0 = std::max(0, (x0 - border) / bucketSize);
+  const int cellY0 = std::max(0, (y0 - border) / bucketSize);
+  const int cellX1 = std::min<int>(hBuckets - 1, (x1 - border) / bucketSize);
+  const int cellY1 = std::min<int>(vBuckets - 1, (y1 - border) / bucketSize);
+
+  for (int i = cellY0; i <= cellY1; i += 1) {
+    for (int j = cellX0; j <= cellX1; j += 1) {
+      const FeatureBucket<capacity> &bucket = buckets[i*hBuckets + j];
+      for (int k = 0; k < bucket.count; k += 1) {
+        const int fx = decodeFastX(bucket[k]);
+        const int fy = decodeFastX(bucket[k]);
+
+        if ((x0 <= fx && fx <= x1) && (y0 <= fy && fy <= y1)) {
+          indices.push_back(GetFeatureIndex(i, j, k));
+        }
+      }
+    }
+  }
+}
+
+template <int capacity, int bucketSize, int border>
+void FeatureGrid<capacity, bucketSize, border>::ExtractAndIndex(
+    std::vector<uint32_t> &features) {
+
+  featureIndex_.reserve(numBuckets);
+
+  for (size_t b = 0; b < numBuckets; b += 1) {
+    featureIndex_.push_back(features.size());
+
+    const FeatureBucket<capacity> &bucket = buckets[b];
+    for (uint32_t i = 0; i < bucket.count; i += 1) {
+      features.push_back(bucket[i]);
+    }
+  }
 }
 
 } /* namespace pislam */
