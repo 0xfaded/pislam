@@ -13,7 +13,7 @@
 
 namespace pislam {
 
-template<int vstep>
+template <int vstep>
 void gaussian5x5_hstore(const int width, const int height,
     const uint8_t img[][vstep], uint8_t *hstore);
 
@@ -26,7 +26,7 @@ void gaussian5x5_hstore(const int width, const int height,
 /// img and out may be same pointer, in which case blur is done in place.
 /// 
 /// Running time for a 640x480 image is 0.7ms on raspberry pi.
-template<int vstep>
+template <int vstep>
 void gaussian5x5(const int width, const int height,
     uint8_t img[][vstep], uint8_t out[][vstep]) {
   // The below applies the seperable gaussian filter
