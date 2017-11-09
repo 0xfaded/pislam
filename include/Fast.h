@@ -185,6 +185,19 @@ struct FeatureGrid {
       numBuckets(hBuckets * vBuckets),
       buckets(new FeatureBucket<capacity>[numBuckets]) {};
 
+  FeatureGrid(const FeatureGrid<capacity, bucketSize, border> &clone)
+    : hBuckets(clone.hBuckets),
+      vBuckets(clone.vBuckets),
+      numBuckets(clone.numBuckets),
+      buckets(new FeatureBucket<capacity>[numBuckets]) {
+
+    std::copy(
+        clone.buckets.get(),
+        clone.buckets.get() + numBuckets,
+        buckets.get());
+  }
+
+
   FeatureBucket<capacity> *Row(size_t i) {
     return &buckets[hBuckets*i];
   }
@@ -195,9 +208,9 @@ struct FeatureGrid {
   void ExtractAndIndex(std::vector<uint32_t> &features);
   void GetFeaturesInArea(int x, int y, int r, std::vector<uint32_t> &indices);
 
-  size_t hBuckets;
-  size_t vBuckets;
-  size_t numBuckets;
+  const size_t hBuckets;
+  const size_t vBuckets;
+  const size_t numBuckets;
 
   std::unique_ptr<FeatureBucket<capacity>[]> buckets;
 
@@ -477,7 +490,7 @@ uint32_t FeatureGrid<capacity, bucketSize, border>::GridReduce(
 
   size_t b = 0;
   for (size_t y = 0; y < v4Buckets; y += 1) {
-    FeatureBucket<capacity> *tl = &buckets[y*hBuckets];
+    FeatureBucket<capacity> *tl = &buckets[2*y*hBuckets];
     FeatureBucket<capacity> *bl = tl + vstep;
 
     for (size_t x = 0; x < h4Buckets; x += 1) {
@@ -489,30 +502,48 @@ uint32_t FeatureGrid<capacity, bucketSize, border>::GridReduce(
     }
   }
 
+  if (vBuckets % 2) {
+    FeatureBucket<capacity> *bucket = Row(vBuckets-1);
+    for (size_t x = 0; x < hBuckets; x += 1) {
+      count += bucket->count;
+      bucket += 1;
+    }
+  }
+
+  if (hBuckets % 2) {
+    FeatureBucket<capacity> *bucket = &buckets[hBuckets-1];
+    for (size_t y = 0; y < (vBuckets & (~1)); y += 1) {
+      count += bucket->count;
+      bucket += vstep;
+    }
+  }
+
   minPerFourCell = std::max(minPerFourCell, 0);
 
   for (int n = maxPerFourCell; n >= minPerFourCell; n -= step) {
     b = 0;
-    for (size_t y = 0; y < vBuckets; y += 2) {
-      FeatureBucket<capacity> *tl = &buckets[y*hBuckets];
+    for (size_t y = 0; y < v4Buckets; y += 1) {
+      FeatureBucket<capacity> *tl = &buckets[2*y*hBuckets];
       FeatureBucket<capacity> *bl = tl + vstep;
 
-      for (size_t x = 0; x < hBuckets; x += 2) {
-        uint32_t count4 = counts4[x];
-        while (count4 > n) {
+      for (size_t x = 0; x < h4Buckets; x += 1) {
+
+        uint32_t count4 = counts4[y*h4Buckets + x];
+
+        while (count4 > static_cast<uint32_t>(n)) {
           uint32_t score = 0xffffffff;
           FeatureBucket<capacity> *best = tl;
 
           if (tl[0].count) {
-            score = best[0];
+            score = (*best)[0];
           }
           if (tl[1].count && tl[1][0] < score) {
             best = &tl[1];
-            score = best[0];
+            score = (*best)[0];
           }
           if (bl[0].count && bl[0][0] < score) {
             best = &bl[0];
-            score = best[0];
+            score = (*best)[0];
           }
           if (bl[1].count && bl[1][0] < score) {
             best = &bl[1];
@@ -521,7 +552,7 @@ uint32_t FeatureGrid<capacity, bucketSize, border>::GridReduce(
           // remove weakest
           best->count -= 1;
           for (uint32_t i = 0; i < best->count; i += 1) {
-            best[i] = best[i+1];
+            (*best)[i] = (*best)[i+1];
           }
 
           count4 -= 1;

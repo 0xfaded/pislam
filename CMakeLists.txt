@@ -38,3 +38,8 @@ add_executable(BilinearTest
   )
 target_link_libraries(BilinearTest TestUtil ${GTEST_BOTH_LIBRARIES})
 
+add_executable(FeatureGridTest
+  test/FeatureGridTest.cpp
+  )
+target_link_libraries(FeatureGridTest TestUtil ${GTEST_BOTH_LIBRARIES})
+
