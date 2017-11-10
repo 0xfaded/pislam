@@ -60,7 +60,8 @@ namespace pislam {
 
 template<int vstep>
 std::vector<int32_t> orbCentroids(uint8_t img[][vstep],
-    const std::vector<uint32_t> &points) {
+    std::vector<uint32_t>::const_iterator begin,
+    std::vector<uint32_t>::const_iterator end) {
 
   // Circle looks like this, reflected about y = 0
   //
@@ -91,8 +92,9 @@ std::vector<int32_t> orbCentroids(uint8_t img[][vstep],
   // rightmost byte, setlane is used.
   //
   // round up to nearest 8
+  std::vector<uint32_t>::size_type numPoints = end - begin;
   std::vector<int32_t> centroids;
-  centroids.resize((2*points.size() + 7) & (~0x7));
+  centroids.resize((2*numPoints + 7) & (~0x7));
 
   // the trick is to create masks which are valid at row x by comparing
   // to the row number.
@@ -121,7 +123,8 @@ std::vector<int32_t> orbCentroids(uint8_t img[][vstep],
   int32_t xmomenti, ymomenti;
 
   int out = 0;
-  for (uint32_t point : points) {
+  for (; begin < end; begin += 1) {
+    uint32_t point = *begin;
     int x = decodeFastX(point);
     int y = decodeFastY(point);
 
@@ -288,6 +291,7 @@ std::vector<int32_t> orbCentroids(uint8_t img[][vstep],
   return centroids;
 }
 
+inline
 std::vector<uint8_t> atan2(const std::vector<int32_t> &xys) {
   // returning angles as uint8_t instead of uint32_t saved
   // 0.2 ms / frame with 1229 points.
@@ -375,12 +379,14 @@ std::vector<uint8_t> atan2(const std::vector<int32_t> &xys) {
 /// Running time is 250 features / ms / GHz
 ///
 template <int vstep, int words>
-void orbCompute(uint8_t img[][vstep], const std::vector<uint32_t> &points,
-    std::vector<uint32_t> &descriptors) {
+void orbCompute(uint8_t img[][vstep], std::vector<uint32_t>::iterator begin,
+    std::vector<uint32_t>::iterator end, std::vector<uint32_t> &descriptors,
+    uint32_t octave = 0) {
 
-  std::vector<int32_t> centroids = orbCentroids<vstep>(img, points);
+  std::vector<int32_t> centroids = orbCentroids<vstep>(img, begin, end);
   std::vector<uint8_t> angles = atan2(centroids);
 
+  const std::vector<uint32_t>::size_type numPoints = end - begin;
   // The briefDescribe function is 1026 instructions long = 4104 bytes.
   // Unfortunately we get killed on cache performance, and it's actually
   // faster to iterate over the points 30 times calling only the
@@ -392,17 +398,18 @@ void orbCompute(uint8_t img[][vstep], const std::vector<uint32_t> &points,
   // 3s, and 4s each slightly decreased execution time, but pairs were
   // chosen since the speed up is probably not worth the cache loss.
 #define PISLAM_ORB_COMPUTE_DESCRIBE(rot) \
-  for (size_t i = 0; i < points.size(); i += 1) { \
+  for (size_t i = 0; i < numPoints; i += 1) { \
     if (rot*2 <= angles[i] && angles[i] < (rot + 1)*2) { \
-      uint32_t point = points[i]; \
+      uint32_t point = begin[i]; \
       int x = decodeFastX(point); \
       int y = decodeFastY(point); \
       briefDescribe<vstep, words>(img, x, y, angles[i], &out[i*words]); \
+      begin[i] = encodeOrb(octave, rot, point); \
     } \
   }
 
-  descriptors.resize(descriptors.size() + points.size()*words);
-  auto out = descriptors.end() - (points.size()*words);
+  descriptors.resize(descriptors.size() + numPoints*words);
+  auto out = descriptors.end() - (numPoints*words);
 
   PISLAM_ORB_COMPUTE_DESCRIBE(0);
   PISLAM_ORB_COMPUTE_DESCRIBE(1);
@@ -420,6 +427,14 @@ void orbCompute(uint8_t img[][vstep], const std::vector<uint32_t> &points,
   PISLAM_ORB_COMPUTE_DESCRIBE(13);
   PISLAM_ORB_COMPUTE_DESCRIBE(14);
 }
+
+template <int vstep, int words>
+void orbCompute(uint8_t img[][vstep], std::vector<uint32_t> &points,
+    std::vector<uint32_t> &descriptors) {
+
+  orbCompute<vstep, words>(img, points.begin(), points.end(), descriptors);
+}
+
 } /* namespace pislam */
 
 #endif /* PISLAM_ORB_H_ */

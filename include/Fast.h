@@ -208,7 +208,8 @@ struct FeatureGrid {
       int step, uint32_t totalDesiredFeatures);
 
   void ExtractAndIndex(std::vector<uint32_t> &features);
-  void GetFeaturesInArea(int x, int y, int r, std::vector<uint32_t> &indices);
+  void GetFeaturesInArea(int x, int y, int r,
+      std::vector<uint32_t> &indices) const;
 
   const size_t hBuckets;
   const size_t vBuckets;
@@ -418,10 +419,9 @@ void fastExtract(const int width, const int height,
 ///
 /// Running time is < 1 ms for a 640x480 VGA image.
 template <int vstep, int border, int logBucketSize = 1, int bucketLimit = 5>
-FeatureGrid<bucketLimit, logBucketSize, border> fastBucket(
-    const int width, const int height, uint8_t out[][vstep]) {
+void fastBucket(const int width, const int height, uint8_t out[][vstep],
+    FeatureGrid<bucketLimit, logBucketSize, border> &grid) {
 
-  FeatureGrid<bucketLimit, logBucketSize, border> grid(width, height);
   for (size_t b = 0; b < grid.numBuckets; b += 1) {
     grid.buckets[b].count = 0;
   }
@@ -431,7 +431,6 @@ FeatureGrid<bucketLimit, logBucketSize, border> fastBucket(
 
   if (logBucketSize < 1) {
     std::cerr << "pislam::fastBucket requires logBucketSize >= 1" << std::endl;
-    return grid;
   }
 
   // untouched because bucketSize >= 1
@@ -443,8 +442,6 @@ FeatureGrid<bucketLimit, logBucketSize, border> fastBucket(
 
     row += grid.hBuckets;
   }
-
-  return grid;
 }
 
 template <int capacity, int bucketSize, int border>
@@ -555,7 +552,7 @@ uint32_t FeatureGrid<capacity, bucketSize, border>::GridReduce(
 
 template <int capacity, int logBucketSize, int border>
 void FeatureGrid<capacity, logBucketSize, border>::GetFeaturesInArea(
-    const int x, const int y, const int r, std::vector<uint32_t> &indices) {
+    const int x, const int y, const int r, std::vector<uint32_t> &indices) const {
 
   const int x0 = x - r;
   const int y0 = y - r;
