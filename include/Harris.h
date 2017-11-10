@@ -81,7 +81,7 @@ uint8_t harrisScoreSobel(uint8_t img[][vstep], int x, int y,
   uint32x2_t Ixx, Iyy, xx32l, xx32h, yy32l, yy32h; int32x2_t Ixy, xy32l, xy32h;
 
   // load pixels
-  uint8_t (* const base)[640] = (uint8_t (*)[640])(&img[y][x-3]);
+  uint8_t (* const base)[vstep] = (uint8_t (*)[vstep])(&img[y][x-3]);
   row0 = vld1_u8(&base[-3][0]);
   row1 = vld1_u8(&base[-2][0]);
   row2 = vld1_u8(&base[-1][0]);
