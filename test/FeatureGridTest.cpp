@@ -28,8 +28,8 @@ TEST(FeatureGridTest, GridReduce) {
   const int totalDesiredFeatures = 1000;
 
   std::mt19937_64 rng;
-  for (size_t i = 0; i < grid.numBuckets; i += 1) {
-    pislam::FeatureBucket<bucketLimit> &bucket = grid.buckets[i];
+  for (size_t i = 0; i < grid.hBuckets * grid.vBuckets; i += 1) {
+    pislam::FeatureBucket<bucketLimit> &bucket = grid.buckets.get()[i];
     bucket.count = rng() % (bucketLimit+1);
     for (uint32_t j = 0; j < bucket.count; j += 1) {
       bucket[j] = rng();
@@ -120,13 +120,9 @@ TEST(FeatureGridTest, GetFeaturesInArea) {
   pislam::FeatureGrid<bucketLimit, logBucketSize, border> grid(640, 480);
 
   std::mt19937_64 rng;
-  for (size_t i = 0; i < grid.numBuckets; i += 1) {
-    grid.buckets[i].count = 0;
-  }
-
   for (int i = 0; i < numFeatures; i += 1) {
-    uint32_t x = rng() % 608 + 16;
-    uint32_t y = rng() % 448 + 16;
+    uint32_t x = rng() % 608 + border;
+    uint32_t y = rng() % 448 + border;
 
     uint32_t feature = pislam::encodeFast(0, x, y);
 
@@ -180,6 +176,77 @@ TEST(FeatureGridTest, GetFeaturesInArea) {
     for (size_t i = 0; i < indices.size(); i += 1) {
       ASSERT_EQ(indices[i], reference[i]);
     }
+  }
+}
+
+TEST(FeatureGridTest, FindEmptySlices) {
+  constexpr int bucketLimit = 5;
+  constexpr int logBucketSize = 4;
+  constexpr int border = 16;
+  constexpr int bucketSize =
+    pislam::FeatureGrid<bucketLimit, logBucketSize, border>::bucketSize;
+
+  const int numFeatures = 16;
+
+  pislam::FeatureGrid<bucketLimit, logBucketSize, border> grid(640, 480);
+
+  std::mt19937_64 rng;
+  for (int i = 0; i < numFeatures; i += 1) {
+    uint32_t x = rng() % 608 + 16;
+    uint32_t y = rng() % 448 + 16;
+
+    uint32_t feature = pislam::encodeFast(0, x, y);
+
+    x = (x - border) / bucketSize;
+    y = (y - border) / bucketSize;
+
+    pislam::FeatureBucket<bucketLimit> &bucket = grid.Row(y)[x];
+    if (bucket.count < bucketLimit) {
+      bucket[bucket.count] = feature;
+      bucket.count += 1;
+    } else {
+      i -= 1;
+    }
+  }
+
+  std::vector<pislam::FeatureGrid<bucketLimit, logBucketSize, border>> slices;
+
+  slices = grid.FindEmptySlices(3);
+
+  ASSERT_NE(slices.size(), 0);
+
+  size_t notEmptyLeft = 0;
+  for (const auto &slice : slices) {
+    size_t notEmptyWidth = slice.hOffset - notEmptyLeft;
+    if (notEmptyWidth >= 3) {
+      size_t count = 0;
+      for (size_t y = 0; y < grid.vBuckets; y += 1) {
+        for (size_t x = notEmptyLeft; x < slice.hOffset; x += 1) {
+          count += grid.Row(y)[x].count;
+        }
+      }
+      EXPECT_NE(count, 0);
+    } else {
+    }
+    size_t count = 0;
+    for (size_t y = 0; y < grid.vBuckets; y += 1) {
+      for (size_t x = slice.hOffset; x < slice.hOffset + slice.hBuckets; x += 1) {
+        count += grid.Row(y)[x].count;
+      }
+    }
+    EXPECT_EQ(count, 0);
+  }
+  
+  const auto &slice = slices.back();
+  size_t notEmptyWidth = slice.hOffset - notEmptyLeft;
+  if (notEmptyWidth >= 3) {
+    size_t count = 0;
+    for (size_t y = 0; y < grid.vBuckets; y += 1) {
+      for (size_t x = notEmptyLeft; x < slice.hOffset; x += 1) {
+        count += grid.Row(y)[x].count;
+      }
+    }
+    EXPECT_NE(count, 0);
   }
 }
 
