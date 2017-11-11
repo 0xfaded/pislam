@@ -193,23 +193,6 @@ struct FeatureGrid {
     Clear();
   }
 
-  FeatureGrid(const FeatureGrid<capacity, logBucketSize, border> &clone)
-    : hBuckets(clone.hBuckets),
-      vBuckets(clone.vBuckets),
-      hOffset(clone.hOffset),
-      vOffset(clone.vOffset),
-      bucketStep(hBuckets),
-      buckets(new FeatureBucket<capacity>[hBuckets * vBuckets],
-          BucketsDeleter()) {
-    const FeatureBucket<capacity> *inPtr = clone.Row(0);
-    FeatureBucket<capacity> *outPtr = Row(0);
-    for (size_t i = 0; i < vBuckets; i += 1) {
-      std::copy(inPtr, inPtr + hBuckets, outPtr);
-      inPtr += clone.bucketStep;
-      outPtr += bucketStep;
-    }
-  }
-
   // subregion constructor shares buckets with parent
   FeatureGrid(FeatureGrid<capacity, logBucketSize, border> &parent,
       size_t hOffset, size_t vOffset, size_t hBuckets, size_t vBuckets)
@@ -220,6 +203,21 @@ struct FeatureGrid {
       bucketStep(parent.bucketStep),
       buckets(parent.buckets, parent.Row(vOffset) + hOffset) {}
 
+  FeatureGrid<capacity, logBucketSize, border> Clone() const {
+    FeatureGrid<capacity, logBucketSize, border> clone(
+        2*border+hBuckets*bucketSize, 2*border+vBuckets*bucketSize);
+
+    const FeatureBucket<capacity> *inPtr = Row(0);
+    FeatureBucket<capacity> *outPtr = clone.Row(0);
+    for (size_t i = 0; i < clone.vBuckets; i += 1) {
+      std::copy(inPtr, inPtr + clone.hBuckets, outPtr);
+      inPtr += bucketStep;
+      outPtr += clone.bucketStep;
+    }
+
+    return clone;
+  }
+
   void Clear() {
     for (size_t i = 0; i < vBuckets; i += 1) {
       FeatureBucket<capacity> *bucketsPtr = Row(i);
@@ -227,6 +225,14 @@ struct FeatureGrid {
         bucketsPtr[j].count = 0;
       }
     }
+  }
+
+  int ImageLeft() const {
+    return hOffset * bucketSize;
+  }
+
+  int ImageWidth() const {
+    return hBuckets * bucketSize + 2*border;
   }
 
   FeatureBucket<capacity> *Row(size_t i) {
@@ -271,7 +277,8 @@ struct FeatureGrid {
 
 /// Internal method for bucketing one row of feature buckets.
 template <int vstep, int border, int bucketSize, int bucketLimit>
-inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_y,
+inline void fastBucketRow(const int width, uint8_t out[][vstep],
+    const int baseX, const int baseY,
     FeatureBucket<bucketLimit> *buckets, std::vector<uint32_t> &results) {
 
   typedef union {
@@ -279,7 +286,7 @@ inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_
     uint32_t *word;
   } aliased_uint32_ptr_t;
 
-  for (int y = base_y; y < base_y + bucketSize; y += 2) {
+  for (int y = baseY; y < baseY + bucketSize; y += 2) {
     for (int x = border; x < width - border; x += 2) {
       aliased_uint32_ptr_t ptr0, ptr1, ptr2, ptr3;
 
@@ -322,7 +329,7 @@ inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_
           if (v0 >= (row0 & 0xff)) {
             row0 >>= 8;
             if (v0 >= (row0 & 0xff)) {
-              result = encodeFast(v0, x, y);
+              result = encodeFast(v0, baseX+x, y);
               goto store;
             }
           }
@@ -334,7 +341,7 @@ inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_
           if (v1 >= (row0 & 0xff)) {
             row0 >>= 8; row1 >>= 24; row2 >>= 24;
             if ((v1 >= (row0 & 0xff)) && (v1 > (row1 & 0xff)) && (v1 > (row2 & 0xff))) {
-              result = encodeFast(v1, x+1, y);
+              result = encodeFast(v1, baseX+x+1, y);
               goto store;
             }
           }
@@ -345,7 +352,7 @@ inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_
           if (v2 > (row3 & 0xff)) {
             row3 >>= 8;
             if (v2 > (row3 & 0xff)) {
-              result = encodeFast(v2, x, y+1);
+              result = encodeFast(v2, baseX+x, y+1);
               goto store;
             }
           }
@@ -357,7 +364,7 @@ inline void fastBucketRow(const int width, uint8_t out[][vstep], const int base_
           if (v3 > (row3 & 0xff)) {
             row1 >>= 24; row2 >>= 24; row3 >>= 8;
             if ((v3 >= (row1 & 0xff)) && (v3 > (row2 & 0xff)) && (v3 > (row3 & 0xff))) {
-              result = encodeFast(v3, x+1, y+1);
+              result = encodeFast(v3, baseX+x+1, y+1);
               goto store;
             }
           }
@@ -429,7 +436,7 @@ void fastExtract(const int width, const int height,
 
     for (int y = border; y < height - border; y += bucketSize) {
       fastBucketRow<vstep, border, bucketSize, bucketLimit>(
-          width, out, y, buckets, results);
+          width, out, 0, y, buckets, results);
 
       // retain best points and reset buckets
       for (int b = 0; b < numBuckets; b += 1) {
@@ -461,6 +468,9 @@ void fastExtract(const int width, const int height,
 /// `logBucketSize` and `bucketLimit` work the same as in extractFast,
 /// but `logBucketSize` must be >= 1.
 ///
+/// If grid is a sub-region, detected coordinates will be offset by the
+/// sub-region position in the image.
+///
 /// Running time is < 1 ms for a 640x480 VGA image.
 template <int vstep, int border, int logBucketSize = 1, int bucketLimit = 5>
 void fastBucket(const int width, const int height, uint8_t out[][vstep],
@@ -473,14 +483,16 @@ void fastBucket(const int width, const int height, uint8_t out[][vstep],
     std::cerr << "pislam::fastBucket requires logBucketSize >= 1" << std::endl;
   }
 
+  int gridLeft = grid.ImageLeft();
+
   // untouched because bucketSize >= 1
   std::vector<uint32_t> dummy;
   FeatureBucket<bucketLimit> *row = grid.Row(0);
   for (int y = border; y < height - border; y += bucketSize) {
     fastBucketRow<vstep, border, bucketSize, bucketLimit>(
-        width, out, y, row, dummy);
+        width, out, gridLeft, y, row, dummy);
 
-    row += grid.hBuckets;
+    row += grid.bucketStep;
   }
 }
 
@@ -644,10 +656,12 @@ FeatureGrid<capacity, logBucketSize, border>::FindEmptySlices(
     int nBucketsWide) {
 
   std::vector<FeatureGrid<capacity, logBucketSize, border>> slices;
+  slices.reserve(hBuckets / nBucketsWide + 1);
 
   size_t emptyLeft = 0;
 
-  for (size_t x = 0; x < hBuckets; x += 1) {
+  size_t x;
+  for (x = 0; x < hBuckets; x += 1) {
     FeatureBucket<capacity> *bucketPtr = buckets.get() + x;
     for (size_t y = 0; y < vBuckets; y += 1) {
       if (bucketPtr->count != 0) {
@@ -660,6 +674,11 @@ FeatureGrid<capacity, logBucketSize, border>::FindEmptySlices(
       }
       bucketPtr += bucketStep;
     }
+  }
+
+  size_t emptyWidth = x - emptyLeft;
+  if (emptyWidth >= size_t(nBucketsWide)) {
+    slices.emplace_back(*this, emptyLeft, 0, emptyWidth, vBuckets);
   }
 
   return slices;

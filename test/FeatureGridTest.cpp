@@ -37,7 +37,8 @@ TEST(FeatureGridTest, GridReduce) {
     std::sort(&bucket[0], &bucket[bucket.count]);
   }
 
-  pislam::FeatureGrid<bucketLimit, logBucketSize, border> referenceGrid(grid);
+  pislam::FeatureGrid<bucketLimit, logBucketSize, border> referenceGrid =
+    grid.Clone();
 
   uint32_t count = grid.GridReduce(minPerFourCell, maxPerFourCell,
     step, totalDesiredFeatures);
