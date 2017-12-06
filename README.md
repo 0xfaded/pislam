@@ -5,24 +5,17 @@ Real-time feature extraction on the Raspberry Pi and other ARM processors suppor
 
 License
 ---
-GPLv3. Contact carlchatfield@gmail.com if interested in non-restrictive licensing.
+PiSlam is a stand-alone work. Carl Chatfield is the sole author and licenses this version under the GPLv3. Contact carlchatfield@gmail.com if interested in licensing an alternative version without GPLv3 restrictions.
 
 Design Goals
 ---
 
-PiSlam intends to be a real-time implementation of ORB-SLAM on the Raspberry Pi 3, and
-possibly other ARM devices supporting the NEON instruction set. As per the original
-[ORB-SLAM](http://webdiis.unizar.es/~raulmur/MurMontielTardosTRO15.pdf) paper's recommendations,
-PiSlam aims for the following metrics:
+PiSlam aims to extract ORB features with the following metrics:
 
+ * Extract and process 1000 ORB descriptors per frame at 30fps.
  * Operate on an VGA 640x480 image stream.
  * Use an 8 level, 1.2 scale reduction pyramid. Approx 750k total pixels.
- * Extract and process 1000 ORB descriptors per frame.
- * 256 bits per descriptor.
-
-Where possible, the algorithms should match as closely as possible the ORB-SLAM implementation.
-For example, the Harris corner measure first applies a Sobel operator because the OpenCV version
-does the same, however it considers only a 6x6 patch instead of 7x7 due to the NEON register width.
+ * Use 256 bits per descriptor.
 
 Currently, the released code is only the SLAM frontend, i.e. the ORB extraction code.
 The performance section shows that these above targets have been achieved.
