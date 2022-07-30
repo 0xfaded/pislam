@@ -5,7 +5,9 @@ Real-time feature extraction on the Raspberry Pi and other ARM processors suppor
 
 License
 ---
-PiSlam is a stand-alone work. Carl Chatfield is the sole author and licenses this version under the GPLv3. Contact carlchatfield@gmail.com if interested in licensing an alternative version without GPLv3 restrictions.
+As of August 2022, PiSlam is licensed under the MIT License. If you find this project useful, I would appreciate an email to carlchatfield@gmail.com,
+
+Thank you :)
 
 Design Goals
 ---
